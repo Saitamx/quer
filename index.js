@@ -68,15 +68,22 @@ const handleEmbeddingResponse = async (input) => {
 
 const getParksData = async () => {
   const response = await axios.get(PARKS_SERVICE);
-  const parkEmbeddings = [];
-  for (const park of response.data) {
-    const parkContext = park.name + " " + park.id;
-    const parkEmbedding = await handleEmbeddingResponse(parkContext);
-    parkEmbeddings.push({
-      park,
-      embedding: parkEmbedding,
-    });
-  }
+  const promises = response.data.map(async (park) => {
+    try {
+      const parkContext = park.name + " " + park.id;
+      const parkEmbedding = await handleEmbeddingResponse(parkContext);
+      return {
+        park,
+        embedding: parkEmbedding,
+      };
+    } catch (error) {
+      console.error(`Failed to get embedding for park ${park.id}: ${error}`);
+      return null;
+    }
+  });
+
+  const results = await Promise.all(promises);
+  const parkEmbeddings = results.filter((result) => result !== null);
   return parkEmbeddings;
 };
 
@@ -95,7 +102,7 @@ const handleVectorial = (questionContextEmbedding, parksDataEmbeddings) => {
     throw new Error("No matching park found");
   }
 
-  // Podemos retornar los primeros N parques más similares
+  // retornar los primeros N parques más similares
   const numSimilarParks = 5;
   const topSimilarParks = parksSimilarityScores.slice(0, numSimilarParks);
 
