@@ -3,7 +3,14 @@ const express = require("express");
 const natural = require("natural");
 const sw = require("stopword");
 const axios = require("axios");
+const rateLimit = require("axios-rate-limit");
 require("dotenv").config();
+
+// Limita a 60 solicitudes por minuto
+const http = rateLimit(axios.create(), {
+  maxRequests: 60,
+  perMilliseconds: 60000,
+});
 
 const app = express();
 
@@ -47,7 +54,7 @@ const countTokens = (message) => {
 
 // servicios externos
 const handleEmbeddingResponse = async (input) => {
-  const embeddingResponse = await axios.post(
+  const embeddingResponse = await http.post(
     EMBEDDINGS_SERVICE,
     {
       input,
@@ -64,7 +71,7 @@ const handleEmbeddingResponse = async (input) => {
 };
 
 const getParksData = async () => {
-  const response = await axios.get(PARKS_SERVICE);
+  const response = await http.get(PARKS_SERVICE);
   const promises = response.data.map(async (park) => {
     try {
       const parkContext = park.name + " " + park.id;
@@ -172,7 +179,7 @@ app.post("/question", async (req, res) => {
 
     console.log("conversation:", new Date(), conversation);
 
-    const response = await axios.post(
+    const response = await http.post(
       CHAT_SERVICE,
       {
         model: CHAT_MODEL,
