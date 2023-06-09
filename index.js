@@ -3,8 +3,9 @@ const express = require("express");
 const natural = require("natural");
 const sw = require("stopword");
 const axios = require("axios");
-const app = express();
 require("dotenv").config();
+
+const app = express();
 
 app.use(express.static("public"));
 app.use(express.json());
@@ -16,24 +17,15 @@ const EMBEDDINGS_SERVICE = process.env.EMBEDDINGS_SERVICE;
 const PARKS_SERVICE = process.env.PARKS_SERVICE;
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL;
 const CHAT_MODEL = process.env.CHAT_MODEL;
-
-const userInfo = { name: "Matías" };
+const NUM_SIMILAR_PARKS = process.env.NUM_SIMILAR_PARKS;
+const MAX_TOKENS = 2048;
 
 const ecoqueraiContext = [
-  `description: en un mundo cada vez más sedentario, mantenerse activo y saludable es un desafío constante. El acceso a espacios deportivos
-    y a entrenamientos adecuados puede ser complicado, especialmente en el caso de la calistenia, una disciplina que utiliza el peso corporal 
-    y que puede practicarse en parques y espacios públicos. Ecoquerai nace para solucionar este problema, ofreciendo una plataforma digital que 
-    reúne información sobre parques de calistenia en todo el mundo y potencia la experiencia de entrenamiento con inteligencia artificial. Los 
-    usuarios pueden descubrir parques cercanos, obtener detalles sobre sus instalaciones y acceder a rutinas de entrenamiento personalizadas, 
-    adaptadas a sus objetivos y al equipamiento disponible. Además, Ecoquerai promueve la inclusión y el compromiso comunitario a través de 
-    eventos y una función de recolección de códigos QR. Finalmente, la plataforma incluye un ecommerce de accesorios, ropa y suplementos deportivos, 
-    completando una propuesta integral para la comunidad deportiva.
-    Objetivo General del Proyecto:
-    Desarrollar y lanzar Ecoquerai, una plataforma digital innovadora que integre inteligencia artificial adaptativa y principios de economía circular 
-    para optimizar la experiencia de entrenamiento en calistenia y deportes en general, facilitar el acceso a información sobre parques y espacios deportivos, 
-    y fomentar la conexión social entre deportistas de todos los niveles y habilidades.
-    `,
+  process.env.ECOQUERAI_CONTEXT_1,
+  process.env.ECOQUERAI_CONTEXT_2,
 ];
+
+const userInfo = { name: "Matías" };
 
 const generalContext = `
 Soy QUER una amable y muy perpicaz inteligencia artificial que conoce la jerga chilena, experto en 
@@ -47,6 +39,11 @@ let conversation = [];
 
 const tokenizer = new natural.WordTokenizer();
 const stemmer = natural.PorterStemmerEs;
+
+// Función para contar los tokens en un mensaje
+const countTokens = (message) => {
+  return Math.ceil(message.length / 4.5);
+};
 
 // servicios externos
 const handleEmbeddingResponse = async (input) => {
@@ -103,7 +100,7 @@ const handleVectorial = (questionContextEmbedding, parksDataEmbeddings) => {
   }
 
   // retornar los primeros N parques más similares
-  const numSimilarParks = 5;
+  const numSimilarParks = parseInt(NUM_SIMILAR_PARKS);
   const topSimilarParks = parksSimilarityScores.slice(0, numSimilarParks);
 
   const finalParksData = topSimilarParks.map((similarPark) =>
@@ -144,24 +141,36 @@ app.post("/question", async (req, res) => {
   try {
     const parksDataEmbeddings = await getParksData();
 
-    console.log("parksDataEmbeddings:", parksDataEmbeddings);
-
     const questionContextEmbedding = await handleEmbeddingResponse(question);
-    console.log("questionContextEmbedding:", questionContextEmbedding);
 
     const { finalGeneralContext } = handleVectorial(
       questionContextEmbedding,
       parksDataEmbeddings
     );
 
-    console.log("finalGeneralContext:", finalGeneralContext);
+    // Asegúrate de que el mensaje no exceda el límite de tokens
+    if (countTokens(finalGeneralContext) > MAX_TOKENS) {
+      return res.status(400).json({ error: "Message is too long" });
+    }
 
     conversation.push(
       { role: "system", content: finalGeneralContext },
       { role: "user", content: question }
     );
 
-    console.log("conversation", conversation);
+    // Calcula el número total de tokens en la conversación
+    let totalTokens = conversation.reduce(
+      (total, message) => total + countTokens(message.content),
+      0
+    );
+
+    // Si la conversación tiene demasiados tokens, elimina los mensajes más antiguos hasta que esté por debajo del límite
+    while (totalTokens > MAX_TOKENS) {
+      const removedMessage = conversation.shift();
+      totalTokens -= countTokens(removedMessage.content);
+    }
+
+    console.log("conversation:", new Date(), conversation);
 
     const response = await axios.post(
       CHAT_SERVICE,
