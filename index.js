@@ -21,36 +21,23 @@ app.use(express.static("public"));
 app.use(express.json());
 
 // Configuración de variables de entorno
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const CHAT_SERVICE = process.env.CHAT_SERVICE;
-const EMBEDDINGS_SERVICE = process.env.EMBEDDINGS_SERVICE;
-const PARKS_SERVICE = process.env.PARKS_SERVICE;
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL;
-const CHAT_MODEL = process.env.CHAT_MODEL;
-const NUM_SIMILAR_PARKS = process.env.NUM_SIMILAR_PARKS;
-const MAX_TOKENS = 2048;
-
-// Configuración de contexto y usuario
-const ecoqueraiContext = [
-  process.env.ECOQUERAI_CONTEXT_1,
-  process.env.ECOQUERAI_CONTEXT_2,
-];
-const userInfo = { name: "Matías" };
+const {
+  OPENAI_API_KEY,
+  CHAT_SERVICE,
+  EMBEDDINGS_SERVICE,
+  PARKS_SERVICE,
+  EMBEDDING_MODEL,
+  CHAT_MODEL,
+  NUM_SIMILAR_PARKS,
+  MAX_TOKENS,
+} = process.env;
 
 // Contexto general para la conversación
 const generalContext = `
-Soy QUER, una inteligencia artificial de EcoquerAI, una plataforma innovadora diseñada para conectar a deportistas y facilitar el acceso a espacios de entrenamiento, enfocándose en la calistenia. 
-Mi función principal es "Entrena como QuerAI", donde recomiendo ejercicios y rutinas personalizadas basadas en las instalaciones disponibles y las necesidades individuales de los usuarios. 
-Además, EcoquerAI incluye "La Ruta Calisténica", que anima a los usuarios a explorar parques y coleccionar códigos QR como parte de su experiencia de entrenamiento.
-La plataforma está comprometida con la inclusión y el compromiso comunitario. En el futuro, EcoquerAI planea expandirse para incluir más deportes y características, como perfiles de deportistas con listas de reproducción, nutrición, 
-y recomendaciones de especialistas en salud. También estamos trabajando en integraciones con dispositivos inteligentes para monitorear el sueño, el ritmo cardíaco y otros factores que afectan el rendimiento deportivo.
-Como IA, estoy en constante evolución y se espera que mis recomendaciones se basen cada vez más en el aprendizaje automático. También, ayudaré a los usuarios a mantenerse al tanto de los torneos, obtener información sobre nutrición, 
-técnicas de respiración, y más.
-Estoy aquí para ayudar a los usuarios de EcoquerAI, incluido ${
-  userInfo.name
-}, y contribuir a su experiencia enriquecedora mientras protejo la información sensible. Actualmente, estoy utilizando el siguiente contexto específico sobre EcoquerAI: ${ecoqueraiContext.join(
-  ", "
-)}.`;
+Soy QUER, una inteligencia artificial de EcoquerAI. Nuestro objetivo es combatir la inactividad física que afecta a una gran parte de la población mundial. Para lograr esto, proporcionamos una plataforma digital que facilita el descubrimiento de instalaciones deportivas, proporciona entrenamientos personalizados y fomenta la interacción comunitaria a través de eventos y desafíos. 
+Además, EcoquerAI incluye una tienda en línea para accesorios, ropa y suplementos deportivos. Aspiramos a convertirnos en la red social líder para deportistas y entusiastas del fitness, expandiendo nuestras funcionalidades a otros espacios deportivos.
+La innovación de EcoquerAI radica en la integración de la inteligencia artificial para personalizar las rutinas de entrenamiento según las metas y las instalaciones disponibles, algo que otras plataformas no ofrecen. También proporcionamos una base de datos de parques de calistenia y otros espacios deportivos, permitiendo a los usuarios descubrir nuevos lugares para entrenar.
+Estoy aquí para ayudar a los usuarios de EcoquerAI y contribuir a su experiencia enriquecedora mientras protejo la información sensible. Actualmente, estoy programado para proporcionar información específica sobre parques de calistenia, nutrición, longevidad y buenos hábitos. Puedo ayudarte a encontrar parques de calistenia en tu área, darte consejos sobre nutrición y hábitos saludables, y proporcionarte información sobre cómo mejorar tu longevidad a través del ejercicio y una dieta saludable.`;
 
 // Inicialización de la conversación
 let conversation = [];
@@ -158,10 +145,27 @@ const preprocessText = (text) => {
 
 // Endpoint para manejar las preguntas del usuario
 app.post("/question", async (req, res) => {
-  let question = req.body.question;
-  question = preprocessText(question);
+  let { question, audio } = req.body;
 
-  console.log("question:", question);
+  if (audio) {
+    const audioBuffer = Buffer.from(audio, "base64");
+    const [response] = await client.recognize({
+      config: {
+        encoding: "LINEAR16",
+        sampleRateHertz: 16000,
+        languageCode: "es-ES",
+      },
+      audio: {
+        content: audioBuffer.toString("base64"),
+      },
+    });
+    const transcription = response.results
+      .map((result) => result.alternatives[0].transcript)
+      .join("\n");
+    question = transcription;
+  }
+
+  question = preprocessText(question);
 
   try {
     // Obtiene los datos de los parques y la incrustación de la pregunta
@@ -169,7 +173,7 @@ app.post("/question", async (req, res) => {
     const questionContextEmbedding = await handleEmbeddingResponse(question);
 
     // Calcula la similitud entre la pregunta y los parques
-    const { finalGeneralContext } = handleVectorial(
+    const { finalGeneralContext, finalParksData } = handleVectorial(
       questionContextEmbedding,
       parksDataEmbeddings
     );
@@ -183,7 +187,9 @@ app.post("/question", async (req, res) => {
     conversation.push(
       { role: "system", content: finalGeneralContext },
       { role: "user", content: question }
-    ); // Calcula el número total de tokens en la conversación
+    );
+
+    // Calcula el número total de tokens en la conversación
     let totalTokens = conversation.reduce(
       (total, message) => total + countTokens(message.content),
       0
@@ -216,6 +222,7 @@ app.post("/question", async (req, res) => {
     // Envía la respuesta de la API al cliente
     res.json({
       answer: `QUER AI: ${response.data.choices[0].message["content"]}`,
+      parks: finalParksData,
     });
   } catch (error) {
     // Manejo de errores

@@ -1,0 +1,56 @@
+body {
+  font-family: Arial, sans-serif;
+  background-color: #000;
+  color: #f4f4f4; /* Color del texto */
+}
+
+.container {
+  max-width: 800px;
+  margin: auto;
+  padding: 1em;
+}
+
+h1 {
+  color: #fada5e; /* Color amarillo mostaza */
+}
+
+textarea {
+  min-height: 100px;
+  background-color: #f4f4f4; /* Color de fondo del textarea */
+  color: #000; /* Color de texto del textarea */
+}
+
+.input-group-append {
+  display: flex;
+  justify-content: space-around;
+}
+
+.btn-primary {
+  background-color: #fada5e; /* Color de botón amarillo mostaza */
+  border-color: #fada5e; /* Color del borde del botón */
+  color: #000; /* Color de texto del botón */
+}
+
+.btn-primary:hover,
+.btn-primary:active,
+.btn-primary:focus {
+  background-color: #c99700; /* Color más oscuro para el estado activo/hover/focus del botón */
+  border-color: #c99700; /* Color de borde más oscuro */
+}
+
+#responseContainer {
+  background-color: #f4f4f4; /* Color de fondo del contenedor de respuesta */
+  color: #000; /* Color de texto del contenedor de respuesta */
+  border-radius: 5px;
+  padding: 1em;
+  min-height: 200px;
+}
+
+#spinner {
+  display: none;
+}
+
+#charCount {
+  font-size: 0.8em;
+  color: #888;
+}
