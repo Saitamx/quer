@@ -1,8 +1,8 @@
 // Importación de módulos necesarios
 const similarity = require("compute-cosine-similarity");
 const express = require("express");
-const natural = require("natural");
-const sw = require("stopword");
+// const natural = require("natural");
+// const sw = require("stopword");
 const axios = require("axios");
 const rateLimit = require("axios-rate-limit");
 require("dotenv").config();
@@ -43,8 +43,8 @@ Estoy aquí para ayudar a los usuarios de EcoquerAI y contribuir a su experienci
 let conversation = [];
 
 // Configuración de herramientas de procesamiento de texto
-const tokenizer = new natural.WordTokenizer();
-const stemmer = natural.PorterStemmerEs;
+// const tokenizer = new natural.WordTokenizer();
+// const stemmer = natural.PorterStemmerEs;
 
 // Función para contar los tokens en un mensaje
 const countTokens = (message) => {
@@ -118,29 +118,68 @@ const handleVectorial = (questionContextEmbedding, parksDataEmbeddings) => {
   const finalParksData = topSimilarParks.map((similarPark) =>
     JSON.stringify(similarPark.park)
   );
-  let finalGeneralContext = generalContext + "\n" + finalParksData.join("\n");
+  let finalGeneralContext =
+    generalContext +
+    "\n" +
+    "Parques encontrados en los servicios de ecoquerai luego de hacer la pregunta:" +
+    finalParksData.join("\n");
 
   return { finalGeneralContext, questionContextEmbedding, finalParksData };
 };
 
-// Función para preprocesar el texto
-const preprocessText = (text) => {
-  // Convertir a minúsculas
-  text = text.toLowerCase();
+// Función para preprocesar el texto (puede afectar para mal el rendimiento)
+// const preprocessText = (text) => {
+//   // Convertir a minúsculas
+//   text = text.toLowerCase();
 
-  // Tokenizar el texto (dividirlo en palabras)
-  let tokens = tokenizer.tokenize(text);
+//   // Tokenizar el texto (dividirlo en palabras)
+//   let tokens = tokenizer.tokenize(text);
 
-  // Eliminar palabras vacías
-  tokens = sw.removeStopwords(tokens);
+//   // Eliminar palabras vacías
+//   tokens = sw.removeStopwords(tokens);
 
-  // Lematizar los tokens
-  tokens = tokens.map((token) => stemmer.stem(token));
+//   // Lematizar los tokens
+//   tokens = tokens.map((token) => stemmer.stem(token));
 
-  // Unir los tokens de nuevo en una cadena
-  text = tokens.join(" ");
+//   // Unir los tokens de nuevo en una cadena
+//   text = tokens.join(" ");
 
-  return text;
+//   return text;
+// };
+
+// Clasificación de preguntas con modelo llm
+const classifyQuestion = async (question) => {
+  const prompt = `Pregunta: "${question}"\n¿Está esta pregunta relacionada con parques de calistenia?, responde en una sola palabra "sí" o "no"`;
+  const response = await http.post(
+    CHAT_SERVICE,
+    {
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.0, // Usar un valor bajo para obtener respuestas más consistentes
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  console.log(prompt);
+  console.log(
+    "response.data",
+    response.data?.choices[0]?.message["content"].toLowerCase().slice(0, 2)
+  );
+
+  return (
+    response.data?.choices[0]?.message["content"].toLowerCase().slice(0, 2) ===
+    "sí"
+  );
 };
 
 // Endpoint para manejar las preguntas del usuario
@@ -165,69 +204,78 @@ app.post("/question", async (req, res) => {
     question = transcription;
   }
 
-  question = preprocessText(question);
+  console.log("question", question);
+  const isCalisthenicsQuestion = await classifyQuestion(question);
+  if (isCalisthenicsQuestion) {
+    // question = preprocessText(question);
+    try {
+      // Obtiene los datos de los parques y la incrustación de la pregunta
+      const parksDataEmbeddings = await getParksData();
+      const questionContextEmbedding = await handleEmbeddingResponse(question);
 
-  try {
-    // Obtiene los datos de los parques y la incrustación de la pregunta
-    const parksDataEmbeddings = await getParksData();
-    const questionContextEmbedding = await handleEmbeddingResponse(question);
+      // Calcula la similitud entre la pregunta y los parques
+      const { finalGeneralContext, finalParksData } = handleVectorial(
+        questionContextEmbedding,
+        parksDataEmbeddings
+      );
 
-    // Calcula la similitud entre la pregunta y los parques
-    const { finalGeneralContext, finalParksData } = handleVectorial(
-      questionContextEmbedding,
-      parksDataEmbeddings
-    );
-
-    // Asegúrate de que el mensaje no exceda el límite de tokens
-    if (countTokens(finalGeneralContext) > MAX_TOKENS) {
-      return res.status(400).json({ error: "Message is too long" });
-    }
-
-    // Añade la pregunta y el contexto a la conversación
-    conversation.push(
-      { role: "system", content: finalGeneralContext },
-      { role: "user", content: question }
-    );
-
-    // Calcula el número total de tokens en la conversación
-    let totalTokens = conversation.reduce(
-      (total, message) => total + countTokens(message.content),
-      0
-    );
-
-    // Si la conversación tiene demasiados tokens, elimina los mensajes más antiguos hasta que esté por debajo del límite
-    while (totalTokens > MAX_TOKENS) {
-      const removedMessage = conversation.shift();
-      totalTokens -= countTokens(removedMessage.content);
-    }
-
-    console.log("conversation:", new Date(), conversation);
-
-    // Realiza la solicitud a la API de OpenAI
-    const response = await http.post(
-      CHAT_SERVICE,
-      {
-        model: CHAT_MODEL,
-        messages: conversation,
-        temperature: 0.7, // experimentar con diferentes valores aquí, como 0.2, 0.5, 1, etc
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
+      // Asegúrate de que el mensaje no exceda el límite de tokens
+      if (countTokens(finalGeneralContext) > MAX_TOKENS) {
+        return res.status(400).json({ error: "Message is too long" });
       }
-    );
 
-    // Envía la respuesta de la API al cliente
+      // Añade la pregunta y el contexto a la conversación
+      conversation.push(
+        { role: "system", content: finalGeneralContext },
+        { role: "user", content: question }
+      );
+
+      // Calcula el número total de tokens en la conversación
+      let totalTokens = conversation.reduce(
+        (total, message) => total + countTokens(message.content),
+        0
+      );
+
+      // Si la conversación tiene demasiados tokens, elimina los mensajes más antiguos hasta que esté por debajo del límite
+      while (totalTokens > MAX_TOKENS) {
+        const removedMessage = conversation.shift();
+        totalTokens -= countTokens(removedMessage.content);
+      }
+
+      console.log("conversation:", new Date(), conversation);
+
+      // Realiza la solicitud al modelo llm con la pregunta final
+      const response = await http.post(
+        CHAT_SERVICE,
+        {
+          model: CHAT_MODEL,
+          messages: conversation,
+          temperature: 0.7, // experimentar con diferentes valores aquí, como 0.2, 0.5, 1, etc
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      console.log("response.data", response.data.choices);
+
+      // Envía la respuesta de la API al cliente
+      res.json({
+        answer: `QUER AI: ${response.data.choices[0].message["content"]}`,
+        parks: finalParksData,
+      });
+    } catch (error) {
+      // Manejo de errores
+      console.log(error.response);
+      res.status(500).json({ error: "An error occurred" });
+    }
+  } else {
     res.json({
-      answer: `QUER AI: ${response.data.choices[0].message["content"]}`,
-      parks: finalParksData,
+      answer: `Lo siento, tu pregunta no está relacionada con parques de calistenia. ¿Puedo ayudarte con algo más?`,
     });
-  } catch (error) {
-    // Manejo de errores
-    console.log(error.response);
-    res.status(500).json({ error: "An error occurred" });
   }
 });
 
